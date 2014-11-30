@@ -1,0 +1,115 @@
+Собираем схему на свитчах 2960
+Свитч 3 предопределенно root
+5-1 соединен через fa4
+1-8 через fa1
+8-3 через fa2,fa3 (Реализация EtherChannels)
+3-2 через fa4,fa5 (Реализация EtherChannels)
+3-6 через fa6,fa7 (Реализация EtherChannels)
+2-7 через fa1
+6-4 через fa1
+7-4 через fa2
+2-4 через fa3
+6-7 через fa3
+К свитчу 4 подключаем 3 ПК
+	PC4 => fa4
+	PC5 => fa5
+	PCA=> fa6
+К свитчу 5 подключаем 3 ПК
+	PC1=> fa1
+	PC2=> fa2
+	PC3=> fa3
+Принимаем номера виланов 3 (PC2,PC4) 6(PC1,PC3,PC5)
+5(PCA)-административный,он же native
+Забиваем эти значения в свитчи в раздел Database
+Настраиваем ПК
+	PC1 ip:192.168.6.10 gateway 192.168.6.1
+	PC2 ip:192.168.3.20 gateway 192.168.3.1
+	PC3 ip:192.168.6.30 gateway 192.168.6.1
+	PC4 ip:192.168.3.40 gateway 192.168.3.1
+	PC5 ip:192.168.6.50 gateway 192.168.6.1
+	PCA ip:192.168.5.10 gateway 192.168.5.1
+Включаем протокол VTP на каждом свитче командой sw(config)# vtp domain <domain-name>
+Имя домена определим home
+Реализуем работу VLAN, протокол 802.1q уже поддерживается на выбранных моделях, его включать не надо
+На интерфейсах соединённых с ПК вводим:
+	sw1(config)# interface "такой-то"
+	sw1(config-if)# switchport mode access
+	sw1(config-if)# switchport access vlan "такая-то"
+На остальных:
+	sw1(config)# interface "такой-то"
+	sw1(config-if)# switchport trunk encapsulation dot1q (нужна не во всех коммутаторах)
+	sw1(config-if)# switchport mode trunk
+	sw1(config-if)# switchport trunk native vlan 5  // указываем native VLAN
+Настраиваем 3 как root во всех VLAN: host3(config)#spanning-tree vlan 1,3,5,6 root primary
+Настраиваем EtherChannels:
+	На каждом из свитчей 2,3,6,8 для сдвоенных интерфейсов пишем:
+	sw1(config)# interface range f0/"x"-"y"
+	sw1(config-if-range)# channel-group "z" mode desirable
+Затем настраиваем VLAN для EtherChannels:
+	На каждом из свитчей пишем:
+	sw1(config)# interface Port-channel "z" 
+	sw1(config-if)# switchport mode trunk
+	sw1(config-if)# switchport trunk native vlan 5
+Настраиваем PortFast
+	На свитчах 5,4 прописываем:
+	sw(config)#spanning-tree portfast default
+Настраиваем BPDU Guard
+	На каждом интерфейсе соединенным с ПК пишем:
+	sw(config-if)# spanning-tree bpduguard enable
+Настраиваем Port Security
+	На свитче 4 в интерфейсе fa0/6 пишем:  (Защита порта к которому подключена станция администрирования)
+	host4(config-if)#switchport port-security maximum 1 //на интерфейсе разрешить 1 MAC-адрес,  остальные настройки по умолчанию	
+Настраиваем роутинг
+	Создаем роутер 1841
+		Подключаем его интерфейс fa0/0 к интерфейсу свитча 3 fa0/1
+	Настраиваем интерфейс свитча:
+		sw(config)# interface fa0/1 
+		sw(config-if)# switchport mode trunk
+		sw(config-if)# switchport trunk native vlan 5
+	Настраиваем роутер: // Обеспечение маршрутизации всей схемы
+		host(config)#int fa0/0.5 // На физическом интерфейсе fa0/0 создаем логические подинтерфейсы    .5    .3    .6
+		host(config-subif)#encapsulation dot1q 5 native
+		host(config-subif)#ip address 192.168.5.1 255.255.255.0
+		host(config-subif)#exit
+		host(config)#int fa0/0.3
+		host(config-subif)#encapsulation dot1Q 3
+		host(config-subif)#ip address 192.168.3.1 255.255.255.0
+		host(config-subif)#exit
+		host(config)#int fa0/0.6
+		host(config-subif)#encapsulation dot1Q 6
+		host(config-subif)#ip address 192.168.6.1 255.255.255.0
+		host(config-subif)#exit
+		host(config)#exit
+Готово
+
+Читать здесь:
+
+http://xgu.ru/wiki/VTP
+http://xgu.ru/wiki/VLAN
+http://ru.wikipedia.org/wiki/IEEE_802.1Q
+http://www.netconfig.org/switching/stp/929/
+http://xgu.ru/wiki/STP
+http://xgu.ru/wiki/STP_в_Cisco
+http://xgu.ru/wiki/Port_security
+
+Если нужно подключить ethernet channel через Lacp
+В root прописываем конфигурацию SW1, в подключенный свитч SW2
+SW1 configuration
+
+SW1# configure terminal
+SW1(config)# interface range fastethernet0/0-2
+SW1(config-if-range)# switchport mode access
+SW1(config-if-range)# switchport access vlan 10 		(10 - номер native vlan)
+SW1(config-if-range)# channel-protocol lacp
+SW1(config-if-range)# channel-group 1 mode active
+SW2 etherchannel L2 configuration
+
+
+SW2 configuration
+
+SW2# configure terminal
+SW2(config)# interface range fastethernet0/0-2
+SW2(config-if-range)# switchport mode access
+SW2(config-if-range)# switchport access vlan 10
+SW1(config-if-range)# channel-protocol lacp
+SW2(config-if-range)# channel-group 1 mode passive
